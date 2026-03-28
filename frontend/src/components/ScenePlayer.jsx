@@ -1,184 +1,82 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import WhiteboardCanvas from './WhiteboardCanvas';
 
-function base64ToBlob(b64) {
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  return new Blob([bytes], { type: 'audio/mpeg' });
+function getBestVoice() {
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find((v) => v.name === 'Google US English') ||
+    voices.find((v) => v.name.includes('Google') && v.lang === 'en-US') ||
+    voices.find((v) => v.lang === 'en-US' && !v.localService) ||
+    voices.find((v) => v.lang.startsWith('en-')) ||
+    null
+  );
 }
 
 export default function ScenePlayer({ data }) {
   const { title, summary, scenes } = data;
 
-  const [sceneIdx, setSceneIdx] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [loadingAudio, setLoadingAudio] = useState(true);
-  const [isExporting, setIsExporting] = useState(false);
-  const [animDone, setAnimDone] = useState(false);
-
-  const audioRefs = useRef([]);      // Audio objects per scene
-  const audioUrlsRef = useRef([]);   // Object URLs to revoke on cleanup
-  const activeAudioRef = useRef(null);
-  const canvasRef = useRef(null);
+  const [sceneIdx, setSceneIdx]       = useState(0);
+  const [isPlaying, setIsPlaying]     = useState(false);
+  const [voicesReady, setVoicesReady] = useState(false);
 
   const totalScenes = scenes.length;
-  const scene = scenes[sceneIdx];
+  const scene       = scenes[sceneIdx];
 
-  // ── Fetch all narrations upfront ──────────────────────────────────────────
+  // ── Wait for browser voices to load ──────────────────────────────────────
   useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      setLoadingAudio(true);
-      const results = await Promise.all(
-        scenes.map(async (s) => {
-          try {
-            const res = await fetch('/api/narrate', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text: s.narration }),
-            });
-            const { audio } = await res.json();
-            const url = URL.createObjectURL(base64ToBlob(audio));
-            audioUrlsRef.current.push(url);
-            return new Audio(url);
-          } catch {
-            return null; // narration failed gracefully
-          }
-        })
-      );
-      if (!cancelled) {
-        audioRefs.current = results;
-        setLoadingAudio(false);
-        // Auto-play once audio is ready
-        setIsPlaying(true);
-      }
-    };
-
-    load();
-    return () => {
-      cancelled = true;
-      activeAudioRef.current?.pause();
-      audioUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (window.speechSynthesis.getVoices().length > 0) {
+      setVoicesReady(true);
+    } else {
+      window.speechSynthesis.onvoiceschanged = () => setVoicesReady(true);
+    }
+    return () => window.speechSynthesis.cancel();
   }, []);
 
-  // ── Scene advancement ─────────────────────────────────────────────────────
-  const advanceTo = useCallback((idx) => {
-    activeAudioRef.current?.pause();
-    activeAudioRef.current = null;
-    setAnimDone(false);
-    setSceneIdx(idx);
-  }, []);
+  useEffect(() => {
+    if (voicesReady) setIsPlaying(true);
+  }, [voicesReady]);
 
-  const handleNext = useCallback(() => {
-    if (sceneIdx < totalScenes - 1) advanceTo(sceneIdx + 1);
+  // ── Core speak function ───────────────────────────────────────────────────
+  const speakScene = useCallback((idx, onEnd) => {
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(scenes[idx].narration);
+    utter.rate  = 0.93;
+    utter.pitch = 1.0;
+    utter.voice = getBestVoice();
+    utter.onend   = () => onEnd?.();
+    utter.onerror = () => onEnd?.();
+    window.speechSynthesis.speak(utter);
+  }, [scenes]);
+
+  // ── Advance to next scene ─────────────────────────────────────────────────
+  const handleSceneEnd = useCallback((idx) => {
+    if (idx < totalScenes - 1) setSceneIdx(idx + 1);
     else setIsPlaying(false);
-  }, [sceneIdx, totalScenes, advanceTo]);
+  }, [totalScenes]);
 
-  // ── Start audio when scene changes (while playing) ────────────────────────
   useEffect(() => {
-    if (!isPlaying || loadingAudio) return;
+    if (!isPlaying) return;
+    speakScene(sceneIdx, () => setTimeout(() => handleSceneEnd(sceneIdx), 400));
+  }, [sceneIdx, isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const audio = audioRefs.current[sceneIdx];
-    if (!audio) return;
-
-    activeAudioRef.current = audio;
-    audio.currentTime = 0;
-    audio.play().catch(() => {});
-    audio.onended = () => {
-      // Advance only after animation is also done (or wait a beat)
-      setTimeout(handleNext, 400);
-    };
-  }, [sceneIdx, isPlaying, loadingAudio, handleNext]);
-
-  // ── Play / Pause ──────────────────────────────────────────────────────────
+  // ── Controls ──────────────────────────────────────────────────────────────
   const handlePlayPause = () => {
     if (isPlaying) {
-      activeAudioRef.current?.pause();
+      window.speechSynthesis.cancel();
       setIsPlaying(false);
     } else {
-      const audio = audioRefs.current[sceneIdx];
-      if (audio) {
-        activeAudioRef.current = audio;
-        audio.play().catch(() => {});
-        audio.onended = () => setTimeout(handleNext, 400);
-      }
       setIsPlaying(true);
     }
   };
 
   const goTo = (idx) => {
-    advanceTo(idx);
+    window.speechSynthesis.cancel();
+    setSceneIdx(idx);
     setIsPlaying(false);
   };
 
-  // ── Canvas export (MediaRecorder) ─────────────────────────────────────────
-  const handleExport = async () => {
-    if (isExporting || loadingAudio) return;
-    const canvas = canvasRef.current?.querySelector('canvas');
-    if (!canvas) return;
-
-    setIsExporting(true);
-
-    try {
-      const videoStream = canvas.captureStream(30);
-      const audioCtx = new AudioContext();
-      const dest = audioCtx.createMediaStreamDestination();
-
-      const combined = new MediaStream([
-        ...videoStream.getVideoTracks(),
-        ...dest.stream.getAudioTracks(),
-      ]);
-
-      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : 'video/webm';
-      const recorder = new MediaRecorder(combined, { mimeType: mime });
-      const chunks = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `${title.replace(/\s+/g, '-').toLowerCase()}.webm`;
-        a.click();
-        setIsExporting(false);
-      };
-
-      recorder.start(100);
-
-      // Play all scenes sequentially for recording
-      const playForExport = (idx) => {
-        if (idx >= scenes.length) {
-          setTimeout(() => recorder.stop(), 600);
-          return;
-        }
-        setSceneIdx(idx);
-        setIsPlaying(true);
-
-        const audio = audioRefs.current[idx];
-        if (audio) {
-          const src = audioCtx.createMediaElementSource(audio);
-          src.connect(dest);
-          src.connect(audioCtx.destination);
-          audio.currentTime = 0;
-          audio.play().catch(() => {});
-          audio.onended = () => setTimeout(() => playForExport(idx + 1), 500);
-        } else {
-          setTimeout(() => playForExport(idx + 1), 4000);
-        }
-      };
-
-      playForExport(0);
-    } catch (err) {
-      console.error('Export failed:', err);
-      setIsExporting(false);
-    }
-  };
-
   const progress = ((sceneIdx + 1) / totalScenes) * 100;
+  const notReady = !voicesReady;
 
   return (
     <div className="player">
@@ -190,34 +88,29 @@ export default function ScenePlayer({ data }) {
         </div>
         <div className="meta-badge">
           <span className="badge">{totalScenes} scenes</span>
-          <span className="badge">{data.totalDuration || '~45'}s</span>
-          <span className="badge green">ElevenLabs voice</span>
+          <span className="badge">{data.totalDuration || '~60'}s</span>
+          <span className="badge green">Web Speech</span>
         </div>
       </div>
 
       {/* Whiteboard */}
       <div className="whiteboard-section">
-        <div className="canvas-wrapper" ref={canvasRef}>
+        <div className="canvas-wrapper">
           <WhiteboardCanvas
             key={sceneIdx}
             scene={scene}
             isPlaying={isPlaying}
-            onAnimationComplete={() => setAnimDone(true)}
+            onAnimationComplete={() => {}}
           />
           <div className="scene-badge">
             Scene {sceneIdx + 1}: {scene.title}
           </div>
-          {loadingAudio && (
+          {notReady && (
             <div className="audio-loading-overlay">
               <div className="spinner" style={{ width: 24, height: 24, borderWidth: 2 }} />
-              Generating narration…
+              Loading voices…
             </div>
           )}
-        </div>
-
-        {/* Narration text */}
-        <div className={`narration ${isPlaying ? 'active' : ''}`}>
-          "{scene.narration}"
         </div>
 
         {/* Controls */}
@@ -225,80 +118,40 @@ export default function ScenePlayer({ data }) {
           <div className="progress-track">
             <div className="progress-fill" style={{ width: `${progress}%` }} />
           </div>
-
           <div className="controls-row">
             <div className="playback-btns">
-              <button
-                className="ctrl-btn"
-                onClick={() => goTo(Math.max(0, sceneIdx - 1))}
-                disabled={sceneIdx === 0}
-                title="Previous"
-              >⏮</button>
-              <button
-                className="ctrl-btn play-btn"
-                onClick={handlePlayPause}
-                disabled={loadingAudio}
-                title={isPlaying ? 'Pause' : 'Play'}
-              >
-                {loadingAudio ? '⏳' : isPlaying ? '⏸' : '▶'}
+              <button className="ctrl-btn" onClick={() => goTo(Math.max(0, sceneIdx - 1))} disabled={sceneIdx === 0} title="Previous">⏮</button>
+              <button className="ctrl-btn play-btn" onClick={handlePlayPause} disabled={notReady} title={isPlaying ? 'Pause' : 'Play'}>
+                {notReady ? '⏳' : isPlaying ? '⏸' : '▶'}
               </button>
-              <button
-                className="ctrl-btn"
-                onClick={() => goTo(Math.min(totalScenes - 1, sceneIdx + 1))}
-                disabled={sceneIdx === totalScenes - 1}
-                title="Next"
-              >⏭</button>
+              <button className="ctrl-btn" onClick={() => goTo(Math.min(totalScenes - 1, sceneIdx + 1))} disabled={sceneIdx === totalScenes - 1} title="Next">⏭</button>
             </div>
-
             <span className="scene-counter">Scene {sceneIdx + 1} / {totalScenes}</span>
-
-            <button
-              className="export-btn"
-              onClick={handleExport}
-              disabled={loadingAudio || isExporting}
-              title="Download as video"
-            >
-              {isExporting ? '⏳ Recording…' : '⬇ Export Video'}
-            </button>
           </div>
         </div>
 
         {/* Scene tabs */}
         <div className="scene-tabs" style={{ padding: '0 1.25rem 1rem' }}>
           {scenes.map((s, i) => (
-            <button
-              key={s.id}
-              className={`scene-tab ${i === sceneIdx ? 'active' : ''}`}
-              onClick={() => goTo(i)}
-            >
+            <button key={s.id} className={`scene-tab ${i === sceneIdx ? 'active' : ''}`} onClick={() => goTo(i)}>
               {i + 1}. {s.title}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Script panel — full breakdown */}
-      <div className="script-panel">
-        <div className="script-panel-header">Full Script & Drawing Instructions</div>
-        <div className="scene-cards">
+      {/* Transcript */}
+      <div className="transcript">
+        <div className="transcript-header">Transcript</div>
+        <div className="transcript-body">
           {scenes.map((s, i) => (
             <div
               key={s.id}
-              className={`scene-card ${i === sceneIdx ? 'active' : ''}`}
+              className={`transcript-entry ${i === sceneIdx ? 'active' : ''}`}
               onClick={() => goTo(i)}
             >
-              <div className="scene-num">{i + 1}</div>
-              <div>
-                <div className="scene-card-title">{s.title}</div>
-                <div className="scene-card-narration">"{s.narration}"</div>
-                {s.drawingInstructions?.length > 0 && (
-                  <div className="drawing-steps">
-                    {s.drawingInstructions.map((step, j) => (
-                      <div key={j} className="drawing-step">{step}</div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <span className="transcript-scene-label">Scene {i + 1} — {s.title}</span>
+              <p>{s.narration}</p>
             </div>
           ))}
         </div>

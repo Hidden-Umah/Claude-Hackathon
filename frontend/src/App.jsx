@@ -1,11 +1,17 @@
 import { useState } from 'react';
 import ConceptInput from './components/ConceptInput';
 import ScenePlayer from './components/ScenePlayer';
+import History from './components/History';
+import { useHistory } from './hooks/useHistory';
 
 export default function App() {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [data, setData] = useState(null);
+  const [error, setError]     = useState(null);
+  const [data, setData]       = useState(null);
+
+  const { history, addEntry, removeEntry, clearHistory } = useHistory();
+
+  const loadData = (d) => setData(d);
 
   const handleGenerate = async (concept) => {
     setLoading(true);
@@ -22,7 +28,9 @@ export default function App() {
         const { error: msg } = await res.json().catch(() => ({}));
         throw new Error(msg || `Server error ${res.status}`);
       }
-      setData(await res.json());
+      const result = await res.json();
+      addEntry(concept, result);
+      setData(result);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -38,6 +46,13 @@ export default function App() {
       </header>
 
       <ConceptInput onGenerate={handleGenerate} disabled={loading} />
+
+      <History
+        history={history}
+        onSelect={loadData}
+        onRemove={removeEntry}
+        onClear={clearHistory}
+      />
 
       {error && <div className="error-msg">{error}</div>}
 

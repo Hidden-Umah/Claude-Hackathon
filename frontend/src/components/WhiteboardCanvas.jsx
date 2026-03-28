@@ -3,11 +3,10 @@ import { renderElement, DRAW_DURATION } from '../utils/canvasDrawings';
 
 const W = 800;
 const H = 450;
-
 function getSceneDuration(drawings) {
   if (!drawings?.length) return 3;
   const lastDelay = Math.max(...drawings.map((d) => d.delay || 0));
-  return lastDelay + DRAW_DURATION + 1.2; // hold 1.2s after last element finishes
+  return lastDelay + DRAW_DURATION + 1.2;
 }
 
 export default function WhiteboardCanvas({ scene, isPlaying, onAnimationComplete }) {
@@ -15,7 +14,6 @@ export default function WhiteboardCanvas({ scene, isPlaying, onAnimationComplete
   const rafRef = useRef(null);
   const startRef = useRef(null);
   const doneRef = useRef(false);
-
   const paint = useCallback((timestamp, drawings, duration) => {
     if (!startRef.current) startRef.current = timestamp;
     const elapsed = (timestamp - startRef.current) / 1000;
@@ -38,22 +36,20 @@ export default function WhiteboardCanvas({ scene, isPlaying, onAnimationComplete
     }
   }, [onAnimationComplete]);
 
-  // Draw a static cleared frame (between scenes)
-  const clearCanvas = () => {
+  const clearCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#fefefe';
     ctx.fillRect(0, 0, W, H);
-  };
+  }, []);
 
   useEffect(() => {
     if (!scene) return;
     const drawings = scene.drawings || [];
     const duration = getSceneDuration(drawings);
 
-    // Reset state on scene change
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     startRef.current = null;
     doneRef.current = false;
@@ -63,9 +59,7 @@ export default function WhiteboardCanvas({ scene, isPlaying, onAnimationComplete
       rafRef.current = requestAnimationFrame((ts) => paint(ts, drawings, duration));
     }
 
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene?.id, isPlaying]);
 

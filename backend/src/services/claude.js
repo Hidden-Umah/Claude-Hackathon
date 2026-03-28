@@ -43,18 +43,18 @@ DRAWING TYPES:
   computer:     { type, x, y, size (55-75), label, delay }
 
 RULES:
-- Generate exactly 4 scenes
-- Each scene: 3–6 drawing elements
+- Generate exactly 5 scenes
+- Each scene: 4–7 drawing elements
 - Stagger delays 0.8–1.2s apart so elements draw one at a time
 - Spread elements across the canvas — no overlaps
-- drawingInstructions: plain English description of what's being drawn (2-4 steps)
-- narration: warm, conversational, 2-3 sentences max
+- drawingInstructions: plain English description of what's being drawn (3-5 steps)
+- narration: rich, detailed, conversational — 5 to 7 sentences per scene. Build up the explanation progressively. Use analogies, examples, and "why it matters" context. Speak directly to the viewer like a great teacher. Do NOT be brief.
 - Return ONLY the JSON, nothing else`;
 
 export async function generateScenes(concept) {
   const msg = await client.messages.create({
     model: 'claude-opus-4-6',
-    max_tokens: 2500,
+    max_tokens: 4000,
     system: SYSTEM_PROMPT,
     messages: [
       { role: 'user', content: `Explain this concept with whiteboard scenes: "${concept}"` }
