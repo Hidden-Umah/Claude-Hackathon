@@ -21,7 +21,10 @@ export default function Navbar({ user, onNavigate, onOpenAuth, onLogout }) {
       </button>
 
       <div className="nav-links">
-        <button className="nav-link" onClick={() => onNavigate('pricing')}>Pricing</button>
+        <button className="nav-link" onClick={() => {
+          const el = document.getElementById('pricing');
+          el ? el.scrollIntoView({ behavior: 'smooth' }) : onNavigate('pricing');
+        }}>Pricing</button>
       </div>
 
       <div className="nav-actions">

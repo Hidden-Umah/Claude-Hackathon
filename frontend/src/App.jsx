@@ -5,12 +5,13 @@ import ScenePlayer from './components/ScenePlayer';
 import History from './components/History';
 import AuthModal from './components/AuthModal';
 import PricingPage from './components/PricingPage';
+import LandingPage from './components/LandingPage';
 import { useAuth } from './hooks/useAuth';
 import { useHistory } from './hooks/useHistory';
 
 export default function App() {
   const [page, setPage]         = useState('home');
-  const [authMode, setAuthMode] = useState(null); // 'login' | 'signup' | null
+  const [authMode, setAuthMode] = useState(null);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState(null);
   const [data, setData]         = useState(null);
@@ -18,8 +19,9 @@ export default function App() {
   const { user, login, signup, logout } = useAuth();
   const { history, addEntry, removeEntry, clearHistory } = useHistory();
 
-  const openAuth = (mode) => setAuthMode(mode);
+  const openAuth  = (mode) => setAuthMode(mode);
   const closeAuth = () => setAuthMode(null);
+  const goToApp   = () => openAuth('signup');
 
   const handleGenerate = async (concept) => {
     setLoading(true);
@@ -55,7 +57,9 @@ export default function App() {
         onLogout={logout}
       />
 
-      {page === 'pricing' ? (
+      {!user ? (
+        <LandingPage onGetStarted={goToApp} />
+      ) : page === 'pricing' ? (
         <PricingPage onNavigate={setPage} onOpenAuth={openAuth} />
       ) : (
         <div className="app">

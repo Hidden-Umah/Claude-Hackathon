@@ -12,9 +12,10 @@ function getEnglishVoices() {
 function getDefaultVoice() {
   const voices = window.speechSynthesis.getVoices();
   return (
+    voices.find((v) => v.name === 'Microsoft Mark - English (United States)') ||
+    voices.find((v) => v.name.includes('Microsoft Mark')) ||
     voices.find((v) => v.name === 'Google US English') ||
-    voices.find((v) => v.name.includes('Google') && v.lang === 'en-US') ||
-    voices.find((v) => v.lang === 'en-US' && !v.localService) ||
+    voices.find((v) => v.lang === 'en-US') ||
     voices.find((v) => v.lang.startsWith('en-')) ||
     null
   );
